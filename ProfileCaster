@@ -1,1 +1,174 @@
 
+--Profile Details
+SELECT display_name, fname, bio, 
+       REPLACE(REPLACE(REPLACE(verified_addresses::text, '"', ''), '[',''), ']', '') AS Addresses
+FROM profile_with_addresses
+WHERE fid = '{{enteredFID}}'
+
+-- Number of Followers
+SELECT COUNT(*) AS "number_of_followers"
+FROM links
+WHERE target_fid = '{{enteredFID}}' 
+    AND type = 'follow';
+
+
+-- Number of casts
+SELECT COUNT(*) AS "number_of_casts"
+FROM casts
+WHERE fid = '{{enteredFID}}';
+
+-- Most likes and recasts from Profiles
+WITH likes AS (
+  SELECT 
+    reactions.fid, 
+    COUNT(*) AS num_likes
+  FROM reactions
+  WHERE reactions.target_fid = {{ enteredFID }} 
+    AND reaction_type = 1
+  GROUP BY reactions.fid
+), 
+
+recasts AS (
+  SELECT 
+    reactions.fid, 
+    COUNT(*) AS num_recasts
+  FROM reactions
+  WHERE reactions.target_fid = {{ enteredFID }} 
+    AND reaction_type = 2
+  GROUP BY reactions.fid
+)
+
+SELECT 
+  COALESCE(fnames.fname, 'Unknown') AS Admirer, 
+  COALESCE(likes_recats.num_likes, 0) AS likes, 
+  COALESCE(likes_recats.num_recasts, 0) AS recasts,
+  CASE 
+    WHEN fnames.custody_address IS NOT NULL THEN REPLACE(CONCAT('https://converse.xyz/dm/0', fnames.custody_address), '\', '')
+    ELSE 'No XMTP link available'
+  END AS XMTP
+FROM (
+  SELECT COALESCE(likes.fid, recasts.fid) AS fid, 
+  COALESCE(num_likes, 0) AS num_likes, 
+  COALESCE(num_recasts, 0) AS num_recasts
+  FROM likes
+    FULL OUTER JOIN recasts ON likes.fid = recasts.fid
+) AS likes_recats
+LEFT JOIN (
+  SELECT fid, fname, custody_address
+  FROM fnames
+  WHERE (fid, updated_at) IN (SELECT fid, MAX(updated_at) FROM fnames GROUP BY fid)
+) AS fnames ON likes_recats.fid = fnames.fid
+ORDER BY likes DESC, recasts DESC;
+
+
+--New Followers per Day
+SELECT 
+    DATE(created_at) AS "day",
+    COUNT(*) AS "new_followers_per_day"
+FROM 
+    links
+WHERE 
+    target_fid = '{{ enteredFID }}'
+    AND type = 'follow'
+    AND DATE(created_at) >= '2023-09-06'
+GROUP BY 
+    DATE(created_at)
+ORDER BY 
+    "day" ASC;
+
+
+
+-- Top liked posts
+SELECT 
+    c.timestamp,
+    c.text, 
+    COUNT(r.id) AS total_likes
+FROM 
+    casts AS c
+LEFT JOIN 
+    reactions AS r ON c.hash = r.target_hash AND c.fid = r.target_fid AND r.reaction_type = 1
+WHERE 
+    c.fid = '{{enteredFID}}'
+GROUP BY 
+    c.id, c.text
+ORDER BY 
+    total_likes DESC;
+
+
+--Top Commented Posts
+SELECT 
+    c.timestamp,
+    c.text, 
+    COUNT(r.id) AS total_comments
+FROM 
+    casts AS c
+LEFT JOIN 
+    reactions AS r ON c.hash = r.target_hash AND c.fid = r.target_fid AND r.reaction_type = 2
+WHERE 
+    c.fid = '{{enteredFID}}'
+GROUP BY 
+    c.id, c.text
+ORDER BY 
+    total_comments DESC;
+
+--Average Likes per Cast per Hour of the Day
+SELECT 
+    CONCAT(LPAD(CAST(EXTRACT(HOUR FROM c.timestamp) AS TEXT), 2, '0'), ':00') AS hour_of_day, 
+    AVG(like_count) AS avg_likes_per_cast
+FROM 
+    casts AS c
+LEFT JOIN 
+    (
+        SELECT 
+            target_fid, 
+            target_hash, 
+            COUNT(id) AS like_count
+        FROM 
+            reactions 
+        WHERE 
+            reaction_type = 1
+        GROUP BY 
+            target_fid, target_hash
+    ) AS r ON c.fid = r.target_fid AND c.hash = r.target_hash
+WHERE 
+    c.fid = '{{enteredFID}}'
+GROUP BY 
+    hour_of_day
+ORDER BY 
+    hour_of_day;
+
+
+--Average Comments per cast per Hour of Day
+SELECT 
+    CONCAT(LPAD(CAST(EXTRACT(HOUR FROM c.timestamp) AS TEXT), 2, '0'), ':00') AS hour_of_day, 
+    AVG(comment_count) AS avg_comments_per_cast
+FROM 
+    casts AS c
+LEFT JOIN 
+    (
+        SELECT 
+            target_fid, 
+            target_hash, 
+            COUNT(id) AS comment_count
+        FROM 
+            reactions 
+        WHERE 
+            reaction_type = 2
+        GROUP BY 
+            target_fid, target_hash
+    ) AS r ON c.fid = r.target_fid AND c.hash = r.target_hash
+WHERE 
+    c.fid = '{{enteredFID}}'
+GROUP BY 
+    hour_of_day
+ORDER BY 
+    hour_of_day;
+
+
+
+
+
+
+
+
+
